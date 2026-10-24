@@ -65,68 +65,127 @@
   // ---------- Vídeos: ver el que abres, pero sin pasar al siguiente ----------
 
   function statusId() {
-    var m = location.pathname.match(/\/status\/(\d+)\/video\//);
+    var m = location.pathname.match(/\/status\/(\d+)/);
     return m ? m[1] : null;
   }
 
-  function videoMode() {
-    if (statusId()) return true;
-    return !!document.querySelector('[aria-modal="true"] video, [role="dialog"] video');
+  // Vídeo "grande" en pantalla = estamos en el visor de vídeos.
+  function bigVideo() {
+    var vids = document.getElementsByTagName('video');
+    var W = window.innerWidth, H = window.innerHeight;
+    for (var i = 0; i < vids.length; i++) {
+      var r = vids[i].getBoundingClientRect();
+      if (r.width >= W * 0.95 && r.height >= H * 0.35 &&
+          r.bottom > H * 0.3 && r.top < H * 0.7) return vids[i];
+    }
+    return null;
   }
 
-  var wasVideo = false, startId = null, enteredAt = 0, scrollSnap = new WeakMap();
+  function videoMode() {
+    if (/\/(video|videos)\b/.test(location.pathname)) return true;
+    if (document.querySelector('[aria-modal="true"] video, [role="dialog"] video')) return true;
+    return !!bigVideo();
+  }
+
+  var locked = [], wasVideo = false, startId = null, badge = null, enteredAt = 0;
+  // Durante el primer segundo X coloca el vídeo abierto: se deja y se memoriza esa posición.
+  function settling() { return Date.now() - enteredAt < 1000; }
+
+  function lockScroll() {
+    var v = bigVideo() || document.querySelector('[aria-modal="true"] video, [role="dialog"] video');
+    var els = [document.documentElement, document.body];
+    for (var p = v && v.parentElement; p; p = p.parentElement) els.push(p);
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (!el || el.__nofyLocked) continue;
+      el.__nofyLocked = { o: el.style.overflowY, t: el.style.touchAction, s: el.scrollTop };
+      el.style.setProperty('overflow-y', 'hidden', 'important');
+      el.style.setProperty('touch-action', 'pan-x pinch-zoom', 'important');
+      locked.push(el);
+    }
+  }
+
+  function unlockScroll() {
+    for (var i = 0; i < locked.length; i++) {
+      var el = locked[i], s = el.__nofyLocked;
+      if (!s) continue;
+      el.style.overflowY = s.o;
+      el.style.touchAction = s.t;
+      el.__nofyLocked = null;
+    }
+    locked = [];
+  }
+
+  function showBadge(on) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.style.cssText = 'position:fixed;top:4px;right:8px;z-index:2147483647;' +
+        'background:rgba(0,0,0,.6);color:#4FC3F7;font:11px sans-serif;padding:2px 6px;' +
+        'border-radius:8px;pointer-events:none;';
+      document.documentElement.appendChild(badge);
+    }
+    badge.textContent = '🔒 ' + location.pathname.slice(0, 40);
+    badge.style.display = on ? 'block' : 'none';
+  }
 
   function checkVideo() {
     var now = videoMode();
-    if (now && !wasVideo) {
-      startId = statusId();
-      enteredAt = Date.now();
-      scrollSnap = new WeakMap();
+    if (now && !wasVideo) { startId = statusId(); enteredAt = Date.now(); }
+    if (now) {
+      lockScroll();
+      // Mantiene la posición de todo lo bloqueado.
+      for (var i = 0; i < locked.length; i++) {
+        var el = locked[i], s = el.__nofyLocked;
+        if (!s) continue;
+        if (settling()) s.s = el.scrollTop;
+        else if (Math.abs(el.scrollTop - s.s) > 2) el.scrollTop = s.s;
+      }
+      // Si X ha cambiado a otro post, vuelve al vídeo que abriste.
+      var id = statusId();
+      if (startId && id && id !== startId) { startId = null; history.back(); }
+    } else if (wasVideo) {
+      unlockScroll();
     }
     wasVideo = now;
-    // Si X ha conseguido cambiar a otro vídeo, vuelve al que abriste.
-    if (now && startId) {
-      var id = statusId();
-      if (id && id !== startId) { startId = null; history.back(); }
-    }
+    showBadge(now);
   }
 
-  // Bloquea los deslizamientos verticales dentro del visor de vídeo.
-  var sx = 0, sy = 0;
-  function start(x, y) { sx = x; sy = y; }
-  function isVertical(x, y) {
-    var dx = Math.abs(x - sx), dy = Math.abs(y - sy);
-    return dy > 6 && dy > dx;
-  }
+  // Bloquea los deslizamientos verticales en el visor (decide en el primer movimiento).
+  var sx = 0, sy = 0, gesture = 0; // 0 sin decidir, 1 vertical (bloqueado), 2 horizontal
   window.addEventListener('touchstart', function (e) {
-    if (e.touches.length === 1) start(e.touches[0].clientX, e.touches[0].clientY);
+    gesture = 0;
+    if (e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }
+    if (videoMode()) checkVideo();
   }, { capture: true, passive: true });
   window.addEventListener('touchmove', function (e) {
-    if (e.touches.length !== 1 || !videoMode()) return;
-    if (isVertical(e.touches[0].clientX, e.touches[0].clientY)) {
-      e.preventDefault();
+    if (e.touches.length !== 1 || !wasVideo) return;
+    if (gesture === 0) {
+      var dx = Math.abs(e.touches[0].clientX - sx), dy = Math.abs(e.touches[0].clientY - sy);
+      gesture = dx > dy ? 2 : 1;
+    }
+    if (gesture === 1) {
+      if (e.cancelable) e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation();
     }
   }, { capture: true, passive: false });
-  window.addEventListener('pointerdown', function (e) {
-    if (e.pointerType === 'touch') start(e.clientX, e.clientY);
-  }, { capture: true, passive: true });
-  window.addEventListener('pointermove', function (e) {
-    if (e.pointerType !== 'touch' || !videoMode()) return;
-    if (isVertical(e.clientX, e.clientY)) e.stopPropagation();
-  }, { capture: true, passive: true });
+  ['pointermove', 'touchend'].forEach(function (type) {
+    window.addEventListener(type, function (e) {
+      if (!wasVideo || gesture !== 1) return;
+      if (type === 'pointermove' && e.pointerType !== 'touch') return;
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, { capture: true, passive: true });
+  });
 
-  // Tercera barrera: si algo se desplaza en el visor, lo devuelve a su sitio.
+  // Si algo se desplaza en el visor, lo devuelve a su sitio al momento.
   document.addEventListener('scroll', function (e) {
-    if (!videoMode()) return;
+    if (!wasVideo) return;
     var el = e.target === document ? document.scrollingElement : e.target;
-    if (!el || typeof el.scrollTop !== 'number') return;
-    if (Date.now() - enteredAt < 1200 || !scrollSnap.has(el)) {
-      scrollSnap.set(el, el.scrollTop); // posición inicial del vídeo abierto
-      return;
-    }
-    var keep = scrollSnap.get(el);
-    if (Math.abs(el.scrollTop - keep) > 2) el.scrollTop = keep;
+    var s = el && el.__nofyLocked;
+    if (!s) return;
+    if (settling()) s.s = el.scrollTop;
+    else if (Math.abs(el.scrollTop - s.s) > 2) el.scrollTop = s.s;
   }, { capture: true, passive: true });
 
   var queued = false;
