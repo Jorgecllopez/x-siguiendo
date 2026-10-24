@@ -28,7 +28,48 @@ public class MainActivity extends Activity {
         script = loadAsset("nofy.js");
 
         web = new WebView(this);
-        setContentView(web);
+
+        // Contenedor que deja hueco para la barra de estado, la de navegación,
+        // la cámara frontal y el teclado, para que nada quede tapado.
+        final android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.setBackgroundColor(android.graphics.Color.BLACK);
+        root.addView(web, new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        root.setOnApplyWindowInsetsListener(new android.view.View.OnApplyWindowInsetsListener() {
+            @Override
+            public android.view.WindowInsets onApplyWindowInsets(android.view.View v, android.view.WindowInsets insets) {
+                int l, t, r, b;
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    android.graphics.Insets bars = insets.getInsets(
+                            android.view.WindowInsets.Type.systemBars()
+                            | android.view.WindowInsets.Type.displayCutout());
+                    android.graphics.Insets ime = insets.getInsets(android.view.WindowInsets.Type.ime());
+                    l = bars.left; t = bars.top; r = bars.right; b = Math.max(bars.bottom, ime.bottom);
+                } else {
+                    l = insets.getSystemWindowInsetLeft();
+                    t = insets.getSystemWindowInsetTop();
+                    r = insets.getSystemWindowInsetRight();
+                    b = insets.getSystemWindowInsetBottom();
+                }
+                v.setPadding(l, t, r, b);
+                // Ya aplicados aquí: la web no debe sumarlos otra vez.
+                return android.os.Build.VERSION.SDK_INT >= 30
+                        ? android.view.WindowInsets.CONSUMED
+                        : insets.consumeSystemWindowInsets();
+            }
+        });
+        // Mismo comportamiento en todas las versiones de Android.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
+            root.setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+        setContentView(root);
+        getWindow().setStatusBarColor(android.graphics.Color.BLACK);
+        getWindow().setNavigationBarColor(android.graphics.Color.BLACK);
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
