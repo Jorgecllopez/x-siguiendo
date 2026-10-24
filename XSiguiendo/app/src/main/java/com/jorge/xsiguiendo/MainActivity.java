@@ -88,6 +88,26 @@ public class MainActivity extends Activity {
         else web.loadUrl("https://x.com/home");
     }
 
+    private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable reinject = new Runnable() {
+        @Override public void run() {
+            inject(); // el propio script evita duplicarse
+            handler.postDelayed(this, 1000);
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        handler.post(reinject);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        handler.removeCallbacks(reinject);
+    }
+
     private void inject() {
         if (web != null && !script.isEmpty()) web.evaluateJavascript(script, null);
     }
